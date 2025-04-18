@@ -3,7 +3,6 @@ import time
 from datetime import datetime
 import os
 import multiprocessing
-import shutil
 
 BASE_DIR = ""
 TMP_DIR = os.path.join(BASE_DIR, "tmp")
@@ -11,6 +10,7 @@ RTSP_URL = ""  # example rtsp://username:password@ip:port/live/ch00_0
 SEGMENT_TIME = 60  # seconds
 TIMEOUT = 30  # seconds
 IDLE_TIME = TIMEOUT  # seconds
+VIDEO_FORMAT = ".mp4"
 
 
 def write_log_file(text):
@@ -31,7 +31,7 @@ def record_stream():
                     RTSP_URL, rtsp_transport="tcp", timeout=str(TIMEOUT * 1000000)
                 )
                 .output(
-                    f"{TMP_DIR}/%d-%m-%Y_%H-%M-%S.mp4",
+                    f"{TMP_DIR}/%d-%m-%Y_%H-%M-%S{VIDEO_FORMAT}",
                     c="copy",
                     f="segment",
                     segment_time=SEGMENT_TIME,
@@ -56,11 +56,28 @@ def is_idle(file_path, idle_seconds):
     return (time.time() - last_modified) > idle_seconds
 
 
+def replace_metadata(filepath, output_path):
+    try:
+        filename = os.path.basename(filepath)
+
+        ffmpeg.input(filepath).output(
+            output_path,
+            c="copy",
+            **{"metadata": f"title={filename.replace(VIDEO_FORMAT, "")}"},
+        ).run()
+
+        os.remove(filepath)
+
+        write_log_file(f"Metadata added to {filename}")
+    except ffmpeg.Error:
+        write_log_file(f"Error replacing metadata {filename}")
+
+
 def organize_records():
     while True:
         for filename in os.listdir(TMP_DIR):
             filepath = os.path.join(TMP_DIR, filename)
-            if not filename.endswith(".mp4"):
+            if not filename.endswith(VIDEO_FORMAT):
                 continue
             if not os.path.isfile(filepath):
                 continue
@@ -73,9 +90,9 @@ def organize_records():
 
                 os.makedirs(target_dir, exist_ok=True)
 
-                write_log_file(f"Moving {filename} to {target_dir}")
-                shutil.move(filepath, os.path.join(target_dir, filename))
+                replace_metadata(filepath, os.path.join(target_dir, filename))
 
+                write_log_file(f"{filename} moved to {target_dir}")
             except Exception as e:
                 write_log_file(f"Error moving {filename}: {e}")
 
