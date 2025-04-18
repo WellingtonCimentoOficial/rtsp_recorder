@@ -3,6 +3,7 @@ import time
 from datetime import datetime
 import os
 import multiprocessing
+import shutil
 
 BASE_DIR = ""
 TMP_DIR = os.path.join(BASE_DIR, "tmp")
@@ -19,6 +20,9 @@ def write_log_file(text):
 
 
 def create_tmp_dir():
+    if os.path.exists(TMP_DIR):
+        shutil.rmtree(TMP_DIR)
+
     os.makedirs(TMP_DIR, exist_ok=True)
 
 
@@ -63,7 +67,7 @@ def replace_metadata(filepath, output_path):
         ffmpeg.input(filepath).output(
             output_path,
             c="copy",
-            **{"metadata": f"title={filename.replace(VIDEO_FORMAT, "")}"},
+            **{"metadata": "title=" + filename.replace(VIDEO_FORMAT, "")},
         ).run()
 
         os.remove(filepath)
