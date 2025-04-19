@@ -4,14 +4,7 @@ from datetime import datetime
 import os
 import multiprocessing
 import shutil
-
-BASE_DIR = ""
-TMP_DIR = os.path.join(BASE_DIR, "tmp")
-RTSP_URL = ""  # example rtsp://username:password@ip:port/live/ch00_0
-SEGMENT_TIME = 60  # seconds
-TIMEOUT = 30  # seconds
-IDLE_TIME = TIMEOUT  # seconds
-VIDEO_FORMAT = ".mp4"
+from settings import *
 
 
 def write_log_file(text):
@@ -22,36 +15,46 @@ def write_log_file(text):
 def create_tmp_dir():
     if os.path.exists(TMP_DIR):
         shutil.rmtree(TMP_DIR)
-    
+
     os.makedirs(TMP_DIR, exist_ok=True)
 
 
-def record_stream():
+def record_stream(camera):
     while True:
         try:
-            write_log_file(f"Successfully connected to {RTSP_URL}")
-            (
-                ffmpeg.input(
-                    RTSP_URL, rtsp_transport="tcp", timeout=str(TIMEOUT * 1000000)
-                )
-                .output(
-                    f"{TMP_DIR}/%d-%m-%Y_%H-%M-%S{VIDEO_FORMAT}",
-                    c="copy",
-                    f="segment",
-                    segment_time=SEGMENT_TIME,
-                    reset_timestamps=1,
-                    strftime=1,
-                    **{"c:a": "aac", "b:a": "128k"},
-                )
-                .global_args("-loglevel", "error")
-                .run()
+            write_log_file(f"Successfully connected to {camera["url"]}")
+
+            filename = (
+                camera["name"].replace(" ", "-").replace("_", "-")
+                + "_%d-%m-%Y_%H-%M-%S"
+                + VIDEO_FORMAT
             )
+            output_path = f"{TMP_DIR}/{filename}"
+
+            ffmpeg.input(
+                camera["url"], rtsp_transport="tcp", timeout=str(TIMEOUT * 1000000)
+            ).output(
+                output_path,
+                vcodec="libx264",
+                crf=18,
+                preset="fast",
+                acodec="aac",
+                audio_bitrate="192k",
+                f="segment",
+                segment_time=SEGMENT_TIME,
+                reset_timestamps=1,
+                strftime=1,
+            ).global_args(
+                "-loglevel", "error"
+            ).run()
             write_log_file("The connection dropped")
         except ffmpeg.Error as e:
             write_log_file(
                 f"[{datetime.now()}] FFmpeg failed: {e.stderr.decode() if e.stderr else str(e)}"
             )
-            write_log_file(f"trying to connect again to {RTSP_URL} in 5 seconds...")
+            write_log_file(
+                f"trying to connect again to {camera["url"]} in 5 seconds..."
+            )
             time.sleep(5)
 
 
@@ -63,11 +66,12 @@ def is_idle(file_path, idle_seconds):
 def replace_metadata(filepath, output_path):
     try:
         filename = os.path.basename(filepath)
+        title = filename.split("_")[2].replace(VIDEO_FORMAT, "")
 
         ffmpeg.input(filepath).output(
             output_path,
             c="copy",
-            **{"metadata": "title=" + filename.replace(VIDEO_FORMAT, "")},
+            **{"metadata": "title=" + title},
         ).run()
 
         os.remove(filepath)
@@ -89,28 +93,45 @@ def organize_records():
                 continue
 
             try:
-                date_str = filename.split("_")[0]
-                target_dir = os.path.join(BASE_DIR, date_str)
+                date_str = filename.split("_")[1]
+                camera_name_str = filename.split("_")[0].lower()
+                date_dir = os.path.join(BASE_DIR, date_str)
+                camera_dir = os.path.join(date_dir, camera_name_str)
 
-                os.makedirs(target_dir, exist_ok=True)
+                os.makedirs(date_dir, exist_ok=True)
+                os.makedirs(camera_dir, exist_ok=True)
 
-                replace_metadata(filepath, os.path.join(target_dir, filename))
+                new_filename = filename.split("_")[2]
 
-                write_log_file(f"{filename} moved to {target_dir}")
+                replace_metadata(
+                    filepath=filepath,
+                    output_path=os.path.join(camera_dir, new_filename),
+                )
+
+                write_log_file(f"{filename} moved to {camera_dir}")
             except Exception as e:
                 write_log_file(f"Error moving {filename}: {e}")
 
         time.sleep(5)
 
 
-if __name__ == "__main__":
+def run():
     create_tmp_dir()
 
-    p1 = multiprocessing.Process(target=record_stream)
-    p2 = multiprocessing.Process(target=organize_records)
+    processes = []
 
-    p1.start()
-    p2.start()
+    for camera in camera_list:
+        p = multiprocessing.Process(target=record_stream, args=(camera,))
+        p.start()
+        processes.append(p)
 
-    p1.join()
-    p2.join()
+    organizer = multiprocessing.Process(target=organize_records)
+    organizer.start()
+    processes.append(organizer)
+
+    for process in processes:
+        process.join()
+
+
+if __name__ == "__main__":
+    run()
