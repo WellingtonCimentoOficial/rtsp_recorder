@@ -9,7 +9,8 @@ from settings import *
 
 def write_log_file(text):
     with open(os.path.join(BASE_DIR, "log.txt"), "a") as log:
-        log.write(f"{text}\n")
+        now = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+        log.write(f"{now} {text}\n")
 
 
 def create_tmp_dir():
@@ -53,7 +54,7 @@ def record_stream(camera):
                 f"[{datetime.now()}] FFmpeg failed: {e.stderr.decode() if e.stderr else str(e)}"
             )
             write_log_file(
-                f"trying to connect again to {camera["url"]} in 5 seconds..."
+                f"trying to connect again to {camera['url']} in 5 seconds..."
             )
             time.sleep(5)
 
