@@ -36,11 +36,9 @@ def record_stream(camera):
                 camera["url"], rtsp_transport="tcp", timeout=str(TIMEOUT * 1000000)
             ).output(
                 output_path,
-                vcodec="libx264",
-                crf=18,
-                preset="fast",
+                vcodec="copy",
                 acodec="aac",
-                audio_bitrate="192k",
+                audio_bitrate="128k",
                 f="segment",
                 segment_time=SEGMENT_TIME,
                 reset_timestamps=1,
@@ -64,10 +62,9 @@ def is_idle(file_path, idle_seconds):
     return (time.time() - last_modified) > idle_seconds
 
 
-def replace_metadata(filepath, output_path):
+def replace_metadata(filepath, camera_name, filename, output_path):
     try:
-        filename = os.path.basename(filepath)
-        title = filename.split("_")[2].replace(VIDEO_FORMAT, "")
+        title = filename.replace(VIDEO_FORMAT, "")
 
         ffmpeg.input(filepath).output(
             output_path,
@@ -77,9 +74,9 @@ def replace_metadata(filepath, output_path):
 
         os.remove(filepath)
 
-        write_log_file(f"Metadata added to {filename}")
+        write_log_file(f"Metadata added to {camera_name} {filename}")
     except ffmpeg.Error:
-        write_log_file(f"Error replacing metadata {filename}")
+        write_log_file(f"Error replacing metadata {camera_name} {filename}")
 
 
 def organize_records():
@@ -106,10 +103,12 @@ def organize_records():
 
                 replace_metadata(
                     filepath=filepath,
+                    camera_name=camera_name_str,
+                    filename=new_filename,
                     output_path=os.path.join(camera_dir, new_filename),
                 )
 
-                write_log_file(f"{filename} moved to {camera_dir}")
+                write_log_file(f"{new_filename} moved to {camera_dir}")
             except Exception as e:
                 write_log_file(f"Error moving {filename}: {e}")
 
