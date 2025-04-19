@@ -22,7 +22,7 @@ def create_tmp_dir():
 def record_stream(camera):
     while True:
         try:
-            write_log_file(f"Successfully connected to {camera["url"]}")
+            write_log_file(f"Successfully connected to {camera['url']}")
 
             filename = (
                 camera["name"].replace(" ", "-").replace("_", "-")
