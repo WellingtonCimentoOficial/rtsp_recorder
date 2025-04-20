@@ -1,10 +1,12 @@
 import ffmpeg
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import multiprocessing
 import shutil
 from settings import *
+from emails import send_email
+import threading
 
 
 def write_log_file(text):
@@ -20,41 +22,63 @@ def create_tmp_dir():
     os.makedirs(TMP_DIR, exist_ok=True)
 
 
+def start_ffmpeg(camera):
+    filename = (
+        camera["name"].replace(" ", "-").replace("_", "-")
+        + "_%d-%m-%Y_%H-%M-%S"
+        + VIDEO_FORMAT
+    )
+    output_path = f"{TMP_DIR}/{filename}"
+
+    ffmpeg.input(
+        camera["url"], rtsp_transport="tcp", timeout=str(TIMEOUT * 1000000)
+    ).output(
+        output_path,
+        vcodec="copy",
+        acodec="aac",
+        audio_bitrate="128k",
+        f="segment",
+        segment_time=SEGMENT_TIME,
+        reset_timestamps=1,
+        strftime=1,
+    ).global_args(
+        "-loglevel", "error"
+    ).run()
+
+
+def send_email_async(subject, body):
+    try:
+        send_email(subject, body)
+        write_log_file("The e-mail was send successfully!")
+    except:
+        write_log_file("The e-mail was not sent!")
+
+
 def record_stream(camera):
+    last_email_sent = datetime.now() - timedelta(hours=1)
+
     while True:
         try:
             write_log_file(f"Successfully connected to {camera['url']}")
-
-            filename = (
-                camera["name"].replace(" ", "-").replace("_", "-")
-                + "_%d-%m-%Y_%H-%M-%S"
-                + VIDEO_FORMAT
-            )
-            output_path = f"{TMP_DIR}/{filename}"
-
-            ffmpeg.input(
-                camera["url"], rtsp_transport="tcp", timeout=str(TIMEOUT * 1000000)
-            ).output(
-                output_path,
-                vcodec="copy",
-                acodec="aac",
-                audio_bitrate="128k",
-                f="segment",
-                segment_time=SEGMENT_TIME,
-                reset_timestamps=1,
-                strftime=1,
-            ).global_args(
-                "-loglevel", "error"
-            ).run()
+            start_ffmpeg(camera)
             write_log_file("The connection dropped")
-        except ffmpeg.Error as e:
-            write_log_file(
-                f"[{datetime.now()}] FFmpeg failed: {e.stderr.decode() if e.stderr else str(e)}"
-            )
+        except ffmpeg.Error:
             write_log_file(
                 f"trying to connect again to {camera['url']} in 5 seconds..."
             )
             time.sleep(5)
+
+        if (datetime.now() - last_email_sent).total_seconds() >= SMTP_INTERVAL:
+            threading.Thread(
+                target=send_email_async,
+                args=(
+                    f"{camera['name']} is down!",
+                    f"The connection to {camera['name']} is down",
+                ),
+                daemon=True,
+            ).start()
+
+            last_email_sent = datetime.now()
 
 
 def is_idle(file_path, idle_seconds):
