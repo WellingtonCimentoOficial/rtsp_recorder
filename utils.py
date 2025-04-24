@@ -59,54 +59,180 @@ class Log:
             logging.info(f"{category} {message}")
 
 
-def send_email(subject: str, body: str, category: str):
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = SMTP_EMAIL_FROM
-    msg["To"] = SMTP_EMAIL_TO
-    msg.set_content(body)
+class Email:
+    def __init__(
+        self,
+        smtp_host=SMTP_HOST,
+        smtp_port=SMTP_PORT,
+        smtp_interval=SMTP_INTERVAL,
+        smtp_email_from=SMTP_EMAIL_FROM,
+        smtp_email_to=SMTP_EMAIL_TO,
+    ):
+        self.smtp_host = smtp_host
+        self.smtp_port = smtp_port
+        self.smtp_interval = smtp_interval
+        self.smtp_email_from = smtp_email_from
+        self.smtp_email_to = smtp_email_to
+        self.smtp_login_email = os.getenv("SMTP_LOGIN_EMAIL")
+        self.smtp_login_password = os.getenv("SMTP_LOGIN_PASSWORD")
 
-    smtp_email = os.getenv("SMTP_LOGIN_EMAIL")
-    smtp_password = os.getenv("SMTP_LOGIN_PASSWORD")
+    def send(self, subject: str, body: str, category: str):
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = self.smtp_email_from
+        msg["To"] = self.smtp_email_to
+        msg.set_content(body)
 
-    fail_count = 0
+        fail_count = 0
 
-    while fail_count < 3:
+        while fail_count < 3:
+            try:
+                with smtplib.SMTP(self.smtp_host, self.smtp_port) as smtp:
+                    smtp.ehlo()
+                    smtp.starttls()
+                    smtp.login(self.smtp_login_email, self.smtp_login_password)
+                    smtp.send_message(msg)
+
+                Log.write(
+                    category=category, message="The e-mail was send successfully!"
+                )
+                break
+            except:
+                match fail_count + 1:
+                    case 1:
+                        Log.write(
+                            category=category,
+                            message="The e-mail was not sent, another attempt will be made in 60 seconds...",
+                            level="error",
+                        )
+
+                    case 2:
+                        Log.write(
+                            category=category,
+                            message="The e-mail was not sent, last attempt will be made in 60 seconds...",
+                            level="error",
+                        )
+
+                    case 3:
+                        Log.write(
+                            category=category,
+                            message="Unable to send e-mail.",
+                            level="error",
+                        )
+
+                fail_count += 1
+
+            time.sleep(60)
+
+    def send_async(self, subject: str, body: str, category: str):
+        threading.Thread(
+            target=self.send,
+            args=(subject, body, category),
+            daemon=True,
+        ).start()
+
+
+class Fmpeg:
+    def __init__(
+        self,
+        rtsp_transport="tcp",
+        vcodec="copy",
+        acodec="aac",
+        audio_bitrate="128k",
+        timeout=30 * 1000000,
+        video_format=".mp4",
+        segment_time=10,
+    ):
+        self.rtsp_transport = rtsp_transport
+        self.vcodec = vcodec
+        self.acodec = acodec
+        self.audio_bitrate = audio_bitrate
+        self.timeout = timeout
+        self.video_format = video_format
+        self.segment_time = segment_time
+
+    def get_default(self):
+        data = {
+            "rtsp_transport": self.rtsp_transport,
+            "vcodec": self.vcodec,
+            "acodec": self.acodec,
+            "audio_bitrate": self.audio_bitrate,
+            "timeout": self.timeout,
+            "video_format": self.video_format,
+            "segment_time": self.segment_time,
+        }
+        return data
+
+    def start(self, camera: Camera):
+        filename = (
+            camera["name"].replace(" ", "-").replace("_", "-")
+            + "_%d-%m-%Y_%H-%M-%S"
+            + self.video_format
+        )
+        output_path = f"{TMP_DIR}/{filename}"
+
+        email = Email()
+
+        Log.write(category=Log.RTSP, message=f"Trying to connect to {camera['url']}...")
+
+        process = (
+            ffmpeg.input(
+                camera["url"],
+                rtsp_transport=self.rtsp_transport,
+                timeout=str(self.timeout),
+            )
+            .output(
+                output_path,
+                vcodec=self.vcodec,
+                acodec=self.acodec,
+                audio_bitrate=self.audio_bitrate,
+                f="segment",
+                segment_time=self.segment_time,
+                reset_timestamps=1,
+                strftime=1,
+            )
+            .global_args("-loglevel", "error")
+            .run_async()
+        )
+
+        time.sleep(5)
+
+        if process.poll() is None:
+            Log.write(
+                category=Log.RTSP, message=f"Successfully connected to {camera['url']}"
+            )
+            email.send_async(
+                subject=f"{camera['name']} is up!",
+                body=f"Successfully connected to {camera['name']}",
+                category=Log.RTSP,
+            )
+
+        return process
+
+    def replace_metadata(
+        self, filepath: str, camera_name: str, filename: str, output_path: str
+    ):
         try:
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
-                smtp.ehlo()
-                smtp.starttls()
-                smtp.login(smtp_email, smtp_password)
-                smtp.send_message(msg)
+            title = filename.replace(self.video_format, "")
 
-            Log.write(category=category, message="The e-mail was send successfully!")
-            break
-        except:
-            match fail_count + 1:
-                case 1:
-                    Log.write(
-                        category=category,
-                        message="The e-mail was not sent, another attempt will be made in 60 seconds...",
-                        level="error",
-                    )
+            ffmpeg.input(filepath).output(
+                output_path,
+                c="copy",
+                **{"metadata": "title=" + title},
+            ).run()
 
-                case 2:
-                    Log.write(
-                        category=category,
-                        message="The e-mail was not sent, last attempt will be made in 60 seconds...",
-                        level="error",
-                    )
+            os.remove(filepath)
 
-                case 3:
-                    Log.write(
-                        category=category,
-                        message="Unable to send e-mail.",
-                        level="error",
-                    )
-
-            fail_count += 1
-
-        time.sleep(60)
+            Log.write(
+                category=Log.METADATA,
+                message=f"Metadata added to {camera_name} {filename}",
+            )
+        except ffmpeg.Error:
+            Log.write(
+                category=Log.METADATA,
+                message=f"Error replacing metadata {camera_name} {filename}",
+                level="error",
+            )
 
 
 def create_tmp_dir():
@@ -116,59 +242,9 @@ def create_tmp_dir():
     os.makedirs(TMP_DIR, exist_ok=True)
 
 
-def start_ffmpeg(camera: Camera):
-    filename = (
-        camera["name"].replace(" ", "-").replace("_", "-")
-        + "_%d-%m-%Y_%H-%M-%S"
-        + VIDEO_FORMAT
-    )
-    output_path = f"{TMP_DIR}/{filename}"
-
-    Log.write(category=Log.RTSP, message=f"Trying to connect to {camera['url']}...")
-
-    process = (
-        ffmpeg.input(
-            camera["url"], rtsp_transport="tcp", timeout=str(TIMEOUT * 1000000)
-        )
-        .output(
-            output_path,
-            vcodec="copy",
-            acodec="aac",
-            audio_bitrate="128k",
-            f="segment",
-            segment_time=SEGMENT_TIME,
-            reset_timestamps=1,
-            strftime=1,
-        )
-        .global_args("-loglevel", "error")
-        .run_async()
-    )
-
-    time.sleep(5)
-
-    if process.poll() is None:
-        Log.write(
-            category=Log.RTSP, message=f"Successfully connected to {camera['url']}"
-        )
-        send_email_async(
-            subject=f"{camera['name']} is up!",
-            body=f"Successfully connected to {camera['name']}",
-            category=Log.RTSP,
-        )
-
-    return process
-
-
-def send_email_async(subject: str, body: str, category: str):
-    threading.Thread(
-        target=send_email,
-        args=(subject, body, category),
-        daemon=True,
-    ).start()
-
-
 def storage_checker():
     done_event = threading.Event()
+    email = Email()
 
     while True:
         storage = shutil.disk_usage(BASE_DIR)
@@ -180,7 +256,7 @@ def storage_checker():
         if percent_used >= 90:
             text = f"Storage is at {percent_used}% usage."
             Log.write(category=Log.STORAGE, message=text, level="warning")
-            send_email_async(
+            email.send_async(
                 subject=text,
                 body=f"Total: {total}\nUsed: {used}\nFree: {free}",
                 category=Log.STORAGE,
@@ -196,38 +272,21 @@ def is_idle(file_path: str, idle_seconds: int):
     return (time.time() - last_modified) > idle_seconds
 
 
-def replace_metadata(filepath: str, camera_name: str, filename: str, output_path: str):
-    try:
-        title = filename.replace(VIDEO_FORMAT, "")
-
-        ffmpeg.input(filepath).output(
-            output_path,
-            c="copy",
-            **{"metadata": "title=" + title},
-        ).run()
-
-        os.remove(filepath)
-
-        Log.write(
-            category=Log.METADATA, message=f"Metadata added to {camera_name} {filename}"
-        )
-    except ffmpeg.Error:
-        Log.write(
-            category=Log.METADATA,
-            message=f"Error replacing metadata {camera_name} {filename}",
-            level="error",
-        )
-
-
 def organize_records():
+    fmpeg = Fmpeg()
+    fmpeg_default = fmpeg.get_default()
+
+    idle_time = fmpeg_default["timeout"]
+    video_format = fmpeg_default["video_format"]
+
     while True:
         for filename in os.listdir(TMP_DIR):
             filepath = os.path.join(TMP_DIR, filename)
-            if not filename.endswith(VIDEO_FORMAT):
+            if not filename.endswith(video_format):
                 continue
             if not os.path.isfile(filepath):
                 continue
-            if not is_idle(filepath, IDLE_TIME):
+            if not is_idle(filepath, idle_time):
                 continue
 
             try:
@@ -241,7 +300,7 @@ def organize_records():
 
                 new_filename = filename.split("_")[2]
 
-                replace_metadata(
+                Fmpeg.replace_metadata(
                     filepath=filepath,
                     camera_name=camera_name_str,
                     filename=new_filename,
