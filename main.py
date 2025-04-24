@@ -4,8 +4,8 @@ import multiprocessing
 from utils import (
     create_tmp_dir,
     Log,
-    start_ffmpeg,
-    send_email_async,
+    Fmpeg,
+    Email,
     organize_records,
     storage_checker,
 )
@@ -15,17 +15,16 @@ from settings import SMTP_INTERVAL, camera_list
 
 def record_stream(camera: Camera):
     last_email_sent = datetime.now() - timedelta(hours=1)
-    process = start_ffmpeg(camera)
+
+    fmpeg = Fmpeg()
+    process = fmpeg.start(camera)
+
+    email = Email()
 
     while True:
         if process.poll() is not None:
-            Log.write(
-                category=Log.RTSP,
-                message=f"The connection dropped. Trying to connect again to {camera['url']} in 5 seconds...",
-                level="error",
-            )
             if (datetime.now() - last_email_sent).total_seconds() >= SMTP_INTERVAL:
-                send_email_async(
+                email.send_async(
                     subject=f"{camera['name']} is down!",
                     body=f"The connection to {camera['name']} is down",
                     category=Log.RTSP,
@@ -33,7 +32,7 @@ def record_stream(camera: Camera):
                 last_email_sent = datetime.now()
 
             time.sleep(5)
-            process = start_ffmpeg(camera)
+            process = fmpeg.start(camera)
 
         time.sleep(1)
 
