@@ -1,5 +1,4 @@
 import os
-import shutil
 import time
 from .fmpeg import Fmpeg
 from .logger import Log
@@ -7,9 +6,6 @@ from settings import TMP_DIR, BASE_DIR
 
 
 def create_tmp_dir():
-    if os.path.exists(TMP_DIR):
-        shutil.rmtree(TMP_DIR)
-
     os.makedirs(TMP_DIR, exist_ok=True)
 
 
