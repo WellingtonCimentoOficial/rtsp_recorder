@@ -100,8 +100,6 @@ class Fmpeg:
                 **{"metadata": "title=" + title},
             ).run()
 
-            os.remove(filepath)
-
             log.write(
                 category=log.METADATA,
                 message=f"Metadata added to {camera_name} {filename}",
@@ -112,3 +110,5 @@ class Fmpeg:
                 message=f"Error replacing metadata {camera_name} {filename}",
                 level="error",
             )
+
+        os.remove(filepath)
