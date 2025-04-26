@@ -1,15 +1,12 @@
 import time
 from datetime import datetime, timedelta
 import multiprocessing
-from utils import (
-    create_tmp_dir,
-    Log,
-    Fmpeg,
-    Email,
-    organize_records,
-    storage_checker,
-)
-from custom_types import Camera
+from utils.logger import Log
+from utils.fmpeg import Fmpeg
+from utils.utils import create_tmp_dir, organize_records
+from utils.storage import storage_checker
+from utils.email import Email
+from custom_types.types import Camera
 from settings import SMTP_INTERVAL, camera_list
 
 
