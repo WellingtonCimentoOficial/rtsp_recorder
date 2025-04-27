@@ -3,6 +3,7 @@ import time
 from .fmpeg import Fmpeg
 from .logger import Log
 from settings import TMP_DIR, BASE_DIR
+from datetime import datetime
 
 
 def create_tmp_dir():
@@ -34,12 +35,15 @@ def organize_records():
                 continue
 
             try:
-                date_str = filename.split("_")[1]
+                date = datetime.strptime(filename.split("_")[1], "%d-%m-%Y")
+                year_str = str(date.year)
+                month_str = date.strftime("%B")
+                day_str = str(date.day)
                 camera_name_str = filename.split("_")[0].lower()
-                date_dir = os.path.join(BASE_DIR, date_str)
-                camera_dir = os.path.join(date_dir, camera_name_str)
+                camera_dir = os.path.join(
+                    BASE_DIR, year_str, month_str, day_str, camera_name_str
+                )
 
-                os.makedirs(date_dir, exist_ok=True)
                 os.makedirs(camera_dir, exist_ok=True)
 
                 new_filename = filename.split("_")[2]
